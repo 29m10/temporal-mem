@@ -208,3 +208,6 @@ __marimo__/
 
 # Internal documentation (not for version control)
 docs/
+
+# examples folder
+examples/
