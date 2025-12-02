@@ -86,11 +86,20 @@ class Memory:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        v2 (Day 4):
-        - Extract facts using FactExtractor
-        - Convert to MemoryModel using TemporalEngine
-        - Store metadata in SQLite
-        - Compute embeddings and index in Qdrant
+        Add memories from a message or list of chat messages.
+
+        Pipeline:
+        1. Extract fact candidates via FactExtractor (LLM).
+        2. TemporalEngine converts them to MemoryModel objects
+           (type, slot, TTL, etc.).
+        3. Store all memories in SQLite (source of truth).
+        4. For each ACTIVE memory:
+           - Embed text
+           - Upsert into Qdrant with payload (user_id, type, slot, status, ...)
+
+        This guarantees: once add() returns successfully, future search()
+        calls (in any process) can retrieve these memories, as long as
+        Qdrant data persists.
         """
         if isinstance(messages, str):
             msg_list = [{"role": "user", "content": messages}]
@@ -99,35 +108,37 @@ class Memory:
 
         source_turn_id = metadata.get("turn_id") if metadata else None
 
-        # 1. extract facts
+        # 1. Fact extraction
         fact_candidates = self.fact_extractor.extract_from_messages(msg_list)
+        print(f"[Memory.add] Extracted {len(fact_candidates)} fact candidates")
 
         if not fact_candidates:
             return {"results": []}
 
-        # 2. temporal engine -> MemoryModel
+        # 2. Temporal engine -> MemoryModel
         mem_models = self.temporal_engine.process_write_batch(
             facts=fact_candidates,
             user_id=user_id,
             source_turn_id=source_turn_id,
         )
+        print(f"[Memory.add] Temporal engine produced {len(mem_models)} memories")
 
-        # 3. store in SQLite
+        # 3. Store in SQLite
         for mem in mem_models:
             if not mem.created_at:
                 mem.created_at = _now_iso()
             self.metadata_store.insert(mem)
 
-        # 4. index in Qdrant (embeddings)
-        # Only index active records
+        # 4. Index active memories in Qdrant
+        indexed = 0
         for mem in mem_models:
             if mem.status != "active":
                 continue
+
             try:
                 vec = self.embedder.embed_one(mem.memory)
             except Exception as e:
-                print("[Memory.add] Embedding failed for mem.id =", mem.id, "err:", e)
-                traceback.format_exc()
+                print(f"[Memory.add] Embedding failed for {mem.id}: {e}")
                 continue
 
             payload = {
@@ -146,9 +157,12 @@ class Memory:
                     vector=vec,
                     payload=payload,
                 )
-            except Exception:
-                # Qdrant failure should not break add(); metadata already stored
+                indexed += 1
+            except Exception as e:
+                print(f"[Memory.add] Qdrant upsert failed for {mem.id}: {e}")
                 continue
+
+        print(f"[Memory.add] Indexed {indexed} active memories into Qdrant")
 
         return {
             "results": [self._serialize_memory(m) for m in mem_models],
