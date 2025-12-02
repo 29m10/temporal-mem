@@ -211,3 +211,8 @@ docs/
 
 # examples folder
 examples/
+
+# Qdrant binary and storage
+qdrant
+storage/
+.qdrant-initialized
