@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Optional
 from uuid import uuid4
 
 from ..models import FactCandidate, MemoryModel
@@ -42,18 +43,12 @@ class TemporalEngine:
                 return "other"
 
     def _apply_policies(self, mem: MemoryModel, fact: FactCandidate) -> MemoryModel:
-        """
-        Priority:
-        1. duration_in_days from LLM (for temp stuff)
-        2. fallback to type-based defaults
-        """
         now = datetime.utcnow()
 
-        # 1) explicit duration wins
+        # 1) use duration_in_days if present
         if fact.duration_in_days is not None and fact.duration_in_days > 0:
             days = fact.duration_in_days
             mem.valid_until = (now + timedelta(days=days)).isoformat() + "Z"
-            # simple rule: half-life is half the duration (min 1 day)
             mem.decay_half_life_days = max(1, days // 2) or 1
             return mem
 
@@ -101,9 +96,10 @@ class TemporalEngine:
         self,
         fact: FactCandidate,
         user_id: str,
-        source_turn_id: str | None = None,
+        source_turn_id: Optional[str] = None,
     ) -> MemoryModel:
-        mem_type = self._map_category_to_type(fact.category)
+        # Use semantic routing (kind + slot)
+        mem_type, slot = self._type_and_slot_from_fact(fact)
         created_at = _now_iso()
 
         mem = MemoryModel(
@@ -111,7 +107,7 @@ class TemporalEngine:
             user_id=user_id,
             memory=fact.text,
             type=mem_type,
-            slot=fact.slot,
+            slot=slot,
             status="active",
             created_at=created_at,
             valid_until=None,
@@ -122,15 +118,16 @@ class TemporalEngine:
             extra={},
         )
 
-        mem = self._apply_policies(mem)
+        # 👇 IMPORTANT: pass both mem AND fact
+        mem = self._apply_policies(mem, fact)
         mem = self._resolve_conflicts(mem)
-        return mem  # noqa: RET504
+        return mem
 
     def process_write_batch(
         self,
         facts: list[FactCandidate],
         user_id: str,
-        source_turn_id: str | None = None,
+        source_turn_id: Optional[str] = None,
     ) -> list[MemoryModel]:
         """
         Turn a list of FactCandidate into enriched MemoryModel objects.
