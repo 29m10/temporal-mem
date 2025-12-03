@@ -3,6 +3,7 @@
 import json
 import os
 import sqlite3
+from datetime import datetime
 
 from ..models import MemoryModel
 
@@ -120,6 +121,33 @@ class SqliteStore:
             (new_status, mem_id),
         )
         self.conn.commit()
+
+    def _expire_if_needed(self, mem: MemoryModel) -> MemoryModel:
+        """
+        Check if a memory has expired based on its valid_until timestamp.
+        
+        If the memory has a valid_until date that has passed and the status
+        is "active", marks it as "expired" in the store and updates the
+        memory object's status.
+        
+        Returns the memory model (potentially with updated status).
+        """
+        if not mem.valid_until:
+            return mem
+
+        try:
+            valid_until_dt = datetime.fromisoformat(mem.valid_until.replace("Z", ""))
+        except:
+            return mem
+
+        now = datetime.utcnow()
+
+        if valid_until_dt < now and mem.status == "active":
+            # mark as expired
+            self.update_status(mem.id, "expired")
+            mem.status = "expired"
+        
+        return mem
 
     def get_active_by_slot(self, user_id: str, slot: str) -> list[MemoryModel]:
         cur = self.conn.cursor()
