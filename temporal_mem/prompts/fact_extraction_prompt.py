@@ -16,12 +16,13 @@ GENERIC_FACT_EXTRACTION_PROMPT = """
     - stability: "persistent", "temporary", or "unknown".
     - "persistent" for stable facts (home city, job, long-term preferences).
     - "temporary" for short-lived states (current trip, mood, this week).
-    - temporal_scope: "now", "today", "this_week", "this_month",
-    "specific_range", or "none".
+    - temporal_scope: one of ["now", "today", "this_week", "this_month",
+    "specific_range", "recurrent", "none"].
     - kind: optional domain-specific subtype, such as:
     - "home_location" for statements like "I live in Hyderabad".
     - "current_location" for "I am in Bengaluru this week" or "I am in Delhi today".
     - "trip" for "I am visiting Goa for 3 days".
+    - "food_preference", "entertainment_preference", "hobby", "habit", etc. for preferences.
     Use null if there is no natural subtype.
     - duration_in_days: an integer number of days the fact is expected to hold,
     if it is about a temporary state or trip. If the duration is not clear, use null.
@@ -44,6 +45,22 @@ GENERIC_FACT_EXTRACTION_PROMPT = """
     - "The weather is nice",
     - "I'm just bored",
     - "This conversation is fun".
+    - Also include unusual or extreme one-off events about the user that might be
+    interesting or useful later, especially when they involve clear numbers
+    (for example, "I ran a marathon", "I ate 10 slices of pizza in one day",
+    "I watched 8 episodes of a show in one night").
+    - You may infer soft preferences when behavior strongly suggests them, even if
+    the user does not explicitly say "I like X" or "I love Y".
+    - Example: if the user says "I ate 10 slices of pizza in one day", infer that
+        the user likely enjoys pizza.
+    - Such inferred preferences must use lower confidence (around 0.5–0.7).
+    - Inferred preferences should normally be marked as:
+        - category: "preference"
+        - stability: "persistent" or "unknown"
+        - temporal_scope: "recurrent"
+    - Be conservative with inference:
+    - Do NOT infer a preference if the behavior is clearly framed as unusual,
+        forced, or one-time without enjoyment (for example, "I ate 10 apples as a dare").
 
     Output format:
     Return ONLY valid JSON of the form:
@@ -161,6 +178,58 @@ GENERIC_FACT_EXTRACTION_PROMPT = """
         "kind": "hobby",
         "duration_in_days": null,
         "confidence": 0.88
+        }
+    ]
+    }
+
+    Input: "I ate 10 slices of pizza one day."
+    Output: {
+    "facts": [
+        {
+        "text": "User once ate 10 slices of pizza in a single day",
+        "category": "event",
+        "slot": null,
+        "stability": "temporary",
+        "temporal_scope": "none",
+        "kind": null,
+        "duration_in_days": null,
+        "confidence": 0.88
+        },
+        {
+        "text": "User likely enjoys eating pizza",
+        "category": "preference",
+        "slot": "food_preference",
+        "stability": "persistent",
+        "temporal_scope": "recurrent",
+        "kind": "food_preference",
+        "duration_in_days": null,
+        "confidence": 0.65
+        }
+    ]
+    }
+
+    Input: "I binge-watched 12 hours of K-dramas yesterday."
+    Output: {
+    "facts": [
+        {
+        "text": "User binge-watched K-dramas for 12 hours in one day",
+        "category": "event",
+        "slot": null,
+        "stability": "temporary",
+        "temporal_scope": "today",
+        "kind": null,
+        "duration_in_days": 1,
+        "confidence": 0.88
+        },
+        {
+        "text": "User likely enjoys watching K-dramas",
+        "category": "preference",
+        "slot": "entertainment_preference",
+        "stability": "persistent",
+        "temporal_scope": "recurrent",
+        "kind": "entertainment_preference",
+        "duration_in_days": null,
+        "confidence": 0.65
         }
     ]
     }
