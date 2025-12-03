@@ -128,12 +128,24 @@ class FactExtractor:
             temporal_scope = f.get("temporal_scope")
             kind = f.get("kind")
 
-            # duration_in_days may be null or an int
-            duration_raw = f.get("duration_in_days")
+            # duration fields may be null or an int
+            duration_days_raw = f.get("duration_in_days")
             try:
-                duration_in_days = int(duration_raw) if duration_raw is not None else None
+                duration_in_days = int(duration_days_raw) if duration_days_raw is not None else None
             except (TypeError, ValueError):
                 duration_in_days = None
+
+            duration_hours_raw = f.get("duration_in_hours")
+            try:
+                duration_in_hours = int(duration_hours_raw) if duration_hours_raw is not None else None
+            except (TypeError, ValueError):
+                duration_in_hours = None
+
+            duration_minutes_raw = f.get("duration_in_minutes")
+            try:
+                duration_in_minutes = int(duration_minutes_raw) if duration_minutes_raw is not None else None
+            except (TypeError, ValueError):
+                duration_in_minutes = None
 
             conf_raw = f.get("confidence", 1.0)
             try:
@@ -152,6 +164,8 @@ class FactExtractor:
                     temporal_scope=temporal_scope,
                     kind=kind,
                     duration_in_days=duration_in_days,
+                    duration_in_hours=duration_in_hours,
+                    duration_in_minutes=duration_in_minutes,
                 )
                 results.append(fact)
             except ValidationError:

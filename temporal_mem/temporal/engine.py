@@ -43,17 +43,42 @@ class TemporalEngine:
                 return "other"
 
     def _apply_policies(self, mem: MemoryModel, fact: FactCandidate) -> MemoryModel:
+        """
+        Decide valid_until + decay_half_life_days for a memory.
+
+        Precedence:
+        1) duration_minutes  -> now + minutes
+        2) duration_hours    -> now + hours
+        3) duration_in_days  -> now + days
+        4) fallback by mem.type
+        """
         now = datetime.utcnow()
 
-        # 1) use duration_in_days if present
+        # 1) Minutes (most precise, e.g. "45 minutes", "20 minutes")
+        minutes = getattr(fact, "duration_in_minutes", None)
+        if minutes is not None and minutes > 0:
+            mem.valid_until = (now + timedelta(minutes=minutes)).isoformat() + "Z"
+            # For very short-lived states, TTL is the main guard; half-life can be 1 day.
+            mem.decay_half_life_days = 1
+            return mem
+
+        # 2) Hours (e.g. "for 2 hours at Kolkata airport")
+        hours = getattr(fact, "duration_in_hours", None)
+        if hours is not None and hours > 0:
+            mem.valid_until = (now + timedelta(hours=hours)).isoformat() + "Z"
+            mem.decay_half_life_days = 1
+            return mem
+
+        # 3) Days (e.g. "for 3 days", "for a week")
         if fact.duration_in_days is not None and fact.duration_in_days > 0:
             days = fact.duration_in_days
             mem.valid_until = (now + timedelta(days=days)).isoformat() + "Z"
             mem.decay_half_life_days = max(1, days // 2) or 1
             return mem
 
-        # 2) fallback to type-based defaults
+        # 4) Fallback: type-based defaults
         if mem.type == "temp_state":
+            # No explicit duration → short-lived by default
             mem.decay_half_life_days = 1
             mem.valid_until = (now + timedelta(days=3)).isoformat() + "Z"
         elif mem.type == "preference":
@@ -108,6 +133,7 @@ class TemporalEngine:
             memory=fact.text,
             type=mem_type,
             slot=slot,
+            kind=fact.kind,
             status="active",
             created_at=created_at,
             valid_until=None,
