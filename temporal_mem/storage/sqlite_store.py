@@ -32,6 +32,7 @@ class SqliteStore:
                 memory TEXT NOT NULL,
                 type TEXT,
                 slot TEXT,
+                kind TEXT,
                 status TEXT,
                 created_at TEXT,
                 valid_until TEXT,
@@ -48,6 +49,14 @@ class SqliteStore:
             "CREATE INDEX IF NOT EXISTS idx_mem_user_slot_status ON memories(user_id, slot, status);"
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_mem_status ON memories(status);")
+        
+        # Migration: Add kind column if it doesn't exist (for existing databases)
+        try:
+            cur.execute("ALTER TABLE memories ADD COLUMN kind TEXT;")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore
+            pass
+        
         self.conn.commit()
 
     @staticmethod
@@ -58,6 +67,7 @@ class SqliteStore:
             memory=row["memory"],
             type=row["type"],
             slot=row["slot"],
+            kind=row.get("kind"),  # Use .get() for backward compatibility
             status=row["status"],
             created_at=row["created_at"],
             valid_until=row["valid_until"],
@@ -78,6 +88,7 @@ class SqliteStore:
                 memory,
                 type,
                 slot,
+                kind,
                 status,
                 created_at,
                 valid_until,
@@ -86,7 +97,7 @@ class SqliteStore:
                 supersedes,
                 source_turn_id,
                 extra
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem.id,
@@ -94,6 +105,7 @@ class SqliteStore:
                 mem.memory,
                 mem.type,
                 mem.slot,
+                mem.kind,
                 mem.status,
                 mem.created_at,
                 mem.valid_until,
@@ -173,7 +185,7 @@ class SqliteStore:
         if status:
             cur.execute(
                 """
-                SELECT id, user_id, memory, type, slot, status,
+                SELECT id, user_id, memory, type, slot, kind, status,
                        created_at, valid_until, decay_half_life_days,
                        confidence, supersedes, source_turn_id, extra
                 FROM memories
@@ -184,7 +196,7 @@ class SqliteStore:
         else:
             cur.execute(
                 """
-                SELECT id, user_id, memory, type, slot, status,
+                SELECT id, user_id, memory, type, slot, kind, status,
                        created_at, valid_until, decay_half_life_days,
                        confidence, supersedes, source_turn_id, extra
                 FROM memories
@@ -222,7 +234,7 @@ class SqliteStore:
 
         cur.execute(
             f"""
-            SELECT id, user_id, memory, type, slot, status,
+            SELECT id, user_id, memory, type, slot, kind, status,
                    created_at, valid_until, decay_half_life_days,
                    confidence, supersedes, source_turn_id, extra
             FROM memories
