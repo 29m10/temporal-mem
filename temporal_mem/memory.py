@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import traceback
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -46,36 +47,130 @@ class Memory:
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         config = config or {}
 
-        sqlite_path = config.get("sqlite_path", "~/.temporal_mem/history.db")
-        qdrant_host = config.get("qdrant_host", "localhost")
-        qdrant_port = int(config.get("qdrant_port", 6333))
-        qdrant_collection = config.get("qdrant_collection", "temporal_mem_default")
+        # -------------------------------------------------------
+        # SQLite
+        # -------------------------------------------------------
+        sqlite_path = (
+            config.get("sqlite_path")
+            or os.getenv("SQLITE_PATH")
+        )
+        if not sqlite_path:
+            raise ValueError(
+                "SQLite path not provided. Set SQLITE_PATH or pass sqlite_path."
+            )
 
-        openai_api_key = config.get("openai_api_key")
-        embed_model = config.get("embed_model", "text-embedding-3-small")
-        llm_model = config.get("llm_model", "gpt-4.1-mini")
-        llm_temp = float(config.get("llm_temperature", 0.0))
+        # -------------------------------------------------------
+        # OpenAI credentials
+        # -------------------------------------------------------
+        openai_api_key = (
+            config.get("openai_api_key")
+            or os.getenv("OPENAI_API_KEY")
+        )
+        if not openai_api_key:
+            raise ValueError(
+                "OpenAI API key missing. Set OPENAI_API_KEY or provide `openai_api_key`."
+            )
 
-        # Core components
+        embed_model = (
+            config.get("embed_model")
+            or os.getenv("OPENAI_EMBED_MODEL")
+            or "text-embedding-3-small"
+        )
+
+        llm_model = (
+            config.get("llm_model")
+            or os.getenv("OPENAI_LLM_MODEL")
+            or "gpt-4.1-mini"
+        )
+
+        temp_str = (
+            str(config.get("llm_temperature"))
+            if config.get("llm_temperature") is not None
+            else os.getenv("OPENAI_LLM_TEMPERATURE")
+        )
+        try:
+            llm_temp = float(temp_str) if temp_str is not None else 0.0
+        except:
+            llm_temp = 0.0
+
+        # -------------------------------------------------------
+        # Qdrant configuration
+        # Cloud: QDRANT_URL + QDRANT_API_KEY
+        # Local: QDRANT_HOST + QDRANT_PORT
+        # -------------------------------------------------------
+        qdrant_url = (
+            config.get("qdrant_url")
+            or os.getenv("QDRANT_URL")
+        )
+        qdrant_api_key = (
+            config.get("qdrant_api_key")
+            or os.getenv("QDRANT_API_KEY")
+        )
+
+        qdrant_host = (
+            config.get("qdrant_host")
+            or os.getenv("QDRANT_HOST")
+        )
+        qdrant_port = (
+            config.get("qdrant_port")
+            or os.getenv("QDRANT_PORT")
+        )
+
+        # At least one connection method must be provided
+        if not qdrant_url and not qdrant_host:
+            raise ValueError(
+                "Qdrant config missing. Provide either QDRANT_URL (cloud) "
+                "or QDRANT_HOST (local)."
+            )
+
+        # If URL is provided, API key is required
+        if qdrant_url and not qdrant_api_key:
+            raise ValueError(
+                "Qdrant API key required when using QDRANT_URL. "
+                "Set QDRANT_API_KEY or provide qdrant_api_key."
+            )
+
+        # If HOST is provided, PORT is required
+        if qdrant_host and not qdrant_port:
+            raise ValueError(
+                "Qdrant port required when using QDRANT_HOST. "
+                "Set QDRANT_PORT or provide qdrant_port."
+            )
+
+        # Collection name defaults to "temporal_mem_default" if not provided
+        collection_name = (
+            config.get("qdrant_collection")
+            or os.getenv("QDRANT_COLLECTION")
+            or "temporal_mem_default"
+        )
+
+        # -------------------------------------------------------
+        # Initialize components
+        # -------------------------------------------------------
         self.metadata_store = SqliteStore(path=sqlite_path)
-        self.temporal_engine = TemporalEngine(metadata_store=self.metadata_store)
+        self.temporal_engine = TemporalEngine(self.metadata_store)
+
+        # LLM extractor
         self.fact_extractor = FactExtractor(
             api_key=openai_api_key,
             model=llm_model,
             temperature=llm_temp,
         )
 
-        # Embedding + vector store (Day 4)
+        # Embeddings
         self.embedder = OpenAIEmbedder(
             api_key=openai_api_key,
             model=embed_model,
         )
-        # Vector size depends on model; for text-embedding-3-small it's 1536
+
+        # Vector store (Qdrant)
         self.vector_store = QdrantStore(
+            url=qdrant_url,
+            api_key=qdrant_api_key,
             host=qdrant_host,
             port=qdrant_port,
-            collection=qdrant_collection,
-            vector_size=1536,
+            collection=collection_name,
+            vector_size=self.embedder.vector_size,
         )
 
     # ------------------------------------------------------------------ #
