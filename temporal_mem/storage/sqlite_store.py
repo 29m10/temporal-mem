@@ -11,8 +11,6 @@ from ..models import MemoryModel
 class SqliteStore:
     """
     SQLite-based metadata store for MemoryModel.
-
-    Day 3: fully working implementation.
     """
 
     def __init__(self, path: str = "~/.temporal_mem/history.db") -> None:
@@ -149,7 +147,7 @@ class SqliteStore:
 
         try:
             valid_until_dt = datetime.fromisoformat(mem.valid_until.replace("Z", ""))
-        except:
+        except Exception:
             return mem
 
         now = datetime.utcnow()
@@ -160,6 +158,41 @@ class SqliteStore:
             mem.status = "expired"
         
         return mem
+
+    def expire_user_memories(self, user_id: str) -> int:
+        """
+        Lazy-expire memories for a single user in bulk.
+
+        - Selects all ACTIVE memories for this user with a non-null valid_until.
+        - For each, applies _expire_if_needed (which updates DB if needed).
+        - Returns the number of memories that transitioned from active -> expired.
+
+        This is meant to be called from Memory.add / Memory.list / Memory.search
+        before doing any reads, so that current results only include fresh
+        active memories. Easy to remove later: just stop calling it.
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT *
+            FROM memories
+            WHERE user_id = ?
+              AND status = 'active'
+              AND valid_until IS NOT NULL;
+            """,
+            (user_id,),
+        )
+        rows = cur.fetchall()
+        expired_count = 0
+
+        for row in rows:
+            mem = self._row_to_model(row)
+            old_status = mem.status
+            mem = self._expire_if_needed(mem)
+            if old_status == "active" and mem.status == "expired":
+                expired_count += 1
+
+        return expired_count
 
     def get_active_by_slot(self, user_id: str, slot: str) -> list[MemoryModel]:
         cur = self.conn.cursor()
@@ -252,4 +285,3 @@ class SqliteStore:
             memories.append(mem)
 
         return memories
-
