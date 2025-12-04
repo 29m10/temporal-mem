@@ -137,13 +137,17 @@ class FactExtractor:
 
             duration_hours_raw = f.get("duration_in_hours")
             try:
-                duration_in_hours = int(duration_hours_raw) if duration_hours_raw is not None else None
+                duration_in_hours = (
+                    int(duration_hours_raw) if duration_hours_raw is not None else None
+                )
             except (TypeError, ValueError):
                 duration_in_hours = None
 
             duration_minutes_raw = f.get("duration_in_minutes")
             try:
-                duration_in_minutes = int(duration_minutes_raw) if duration_minutes_raw is not None else None
+                duration_in_minutes = (
+                    int(duration_minutes_raw) if duration_minutes_raw is not None else None
+                )
             except (TypeError, ValueError):
                 duration_in_minutes = None
 

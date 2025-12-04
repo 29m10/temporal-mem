@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from typing import List, Optional
 
 from openai import OpenAI
 
@@ -20,7 +19,7 @@ class OpenAIEmbedder:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         model: str = "text-embedding-3-small",
     ) -> None:
         api_key = api_key or os.getenv("OPENAI_API_KEY")
@@ -30,7 +29,7 @@ class OpenAIEmbedder:
         self.client = OpenAI(api_key=api_key)
         self.model = model
 
-    def embed_one(self, text: str) -> List[float]:
+    def embed_one(self, text: str) -> list[float]:
         """
         Embed a single text and return its embedding vector.
         """
@@ -41,7 +40,7 @@ class OpenAIEmbedder:
         )
         return resp.data[0].embedding
 
-    def embed_many(self, texts: List[str]) -> List[List[float]]:
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
         """
         Embed a list of texts and return list of vectors.
         """
