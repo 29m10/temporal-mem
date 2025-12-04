@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
-from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.http.exceptions import UnexpectedResponse, ResponseHandlingException
 
 
 class QdrantStore:
@@ -21,19 +21,29 @@ class QdrantStore:
 
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 6333,
-        collection: str = "temporal_mem_default",
+        url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        collection: str = "",
         vector_size: int = 1536,
         distance: str = "Cosine",
     ) -> None:
         self.collection = collection
 
-        self.client = QdrantClient(
-            host=host,
-            port=port,
-            # check_compatibility=False,  # optional
-        )
+        # Cloud or local
+        if url:
+            self.client = QdrantClient(
+                url=url,
+                api_key=api_key,
+                # check_compatibility=False, # optional
+            )
+        else:
+            self.client = QdrantClient(
+                host=host,
+                port=port,
+                # check_compatibility=False, # optional
+            )
 
         dist = getattr(qmodels.Distance, distance.upper(), qmodels.Distance.COSINE)
 
@@ -43,6 +53,14 @@ class QdrantStore:
             # Collection exists → nothing to do
             # print(f"[QdrantStore] Using existing collection: {self.collection}")
             return
+        except (ResponseHandlingException, ConnectionError, OSError) as e:
+            # Connection errors - Qdrant server is not running or not accessible
+            connection_info = f"URL: {url}" if url else f"HOST: {host}, PORT: {port}"
+            raise ConnectionError(
+                f"Failed to connect to Qdrant server ({connection_info}). "
+                f"Please ensure Qdrant is running and accessible. "
+                f"Error: {str(e)}"
+            ) from e
         except UnexpectedResponse as e:
             # 404 = not found → we should create it
             if e.status_code != 404:
@@ -51,13 +69,22 @@ class QdrantStore:
 
         # 2) Create collection only if it doesn't exist
         # print(f"[QdrantStore] Creating new collection: {self.collection}")
-        self.client.create_collection(
-            collection_name=self.collection,
-            vectors_config=qmodels.VectorParams(
-                size=vector_size,
-                distance=dist,
-            ),
-        )
+        try:
+            self.client.create_collection(
+                collection_name=self.collection,
+                vectors_config=qmodels.VectorParams(
+                    size=vector_size,
+                    distance=dist,
+                ),
+            )
+        except (ResponseHandlingException, ConnectionError, OSError) as e:
+            # Connection errors during collection creation
+            connection_info = f"URL: {url}" if url else f"HOST: {host}, PORT: {port}"
+            raise ConnectionError(
+                f"Failed to connect to Qdrant server ({connection_info}). "
+                f"Please ensure Qdrant is running and accessible. "
+                f"Error: {str(e)}"
+            ) from e
 
     # ------------------------------------------------------------------ #
     # UPSERT
