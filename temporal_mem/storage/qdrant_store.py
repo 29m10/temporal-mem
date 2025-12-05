@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
-from qdrant_client.http.exceptions import UnexpectedResponse, ResponseHandlingException
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 
 class QdrantStore:
@@ -21,10 +21,10 @@ class QdrantStore:
 
     def __init__(
         self,
-        url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
+        url: str | None = None,
+        api_key: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
         collection: str = "",
         vector_size: int = 1536,
         distance: str = "Cosine",
@@ -59,7 +59,7 @@ class QdrantStore:
             raise ConnectionError(
                 f"Failed to connect to Qdrant server ({connection_info}). "
                 f"Please ensure Qdrant is running and accessible. "
-                f"Error: {str(e)}"
+                f"Error: {e!s}"
             ) from e
         except UnexpectedResponse as e:
             # 404 = not found → we should create it
@@ -83,7 +83,7 @@ class QdrantStore:
             raise ConnectionError(
                 f"Failed to connect to Qdrant server ({connection_info}). "
                 f"Please ensure Qdrant is running and accessible. "
-                f"Error: {str(e)}"
+                f"Error: {e!s}"
             ) from e
 
     # ------------------------------------------------------------------ #
@@ -93,8 +93,8 @@ class QdrantStore:
     def upsert_point(
         self,
         memory_id: str,
-        vector: List[float],
-        payload: Dict[str, Any],
+        vector: list[float],
+        payload: dict[str, Any],
     ) -> None:
         """
         Insert or update a point for a given memory.
@@ -116,11 +116,11 @@ class QdrantStore:
 
     def search(
         self,
-        query_vector: List[float],
+        query_vector: list[float],
         user_id: str,
         limit: int = 10,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Search similar memories for a given user_id.
 
@@ -130,7 +130,7 @@ class QdrantStore:
           ...
         ]
         """
-        must_conditions: List[qmodels.FieldCondition] = [
+        must_conditions: list[qmodels.FieldCondition] = [
             qmodels.FieldCondition(
                 key="user_id",
                 match=qmodels.MatchValue(value=user_id),
@@ -176,7 +176,7 @@ class QdrantStore:
 
         points = resp.points  # list[ScoredPoint]
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for p in points:
             results.append(
                 {
