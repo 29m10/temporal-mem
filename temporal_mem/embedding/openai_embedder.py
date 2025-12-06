@@ -37,13 +37,10 @@ class OpenAIEmbedder:
         # OpenAI embedding model dimensions
         if "text-embedding-3-large" in self.model:
             return 3072
-        elif "text-embedding-3-small" in self.model:
+        if "text-embedding-3-small" in self.model or "text-embedding-ada-002" in self.model:
             return 1536
-        elif "text-embedding-ada-002" in self.model:
-            return 1536
-        else:
-            # Default to 1536 for unknown models (most common)
-            return 1536
+        # Default to 1536 for unknown models (most common)
+        return 1536
 
     def embed_one(self, text: str) -> list[float]:
         """

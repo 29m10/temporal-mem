@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 from .embedding.openai_embedder import OpenAIEmbedder
 from .llm.extractor import FactExtractor
 from .models import MemoryModel
+from .rerankers.factory import create_reranker
 from .storage.qdrant_store import QdrantStore
 from .storage.sqlite_store import SqliteStore
 from .temporal.engine import TemporalEngine
@@ -50,38 +51,24 @@ class Memory:
         # -------------------------------------------------------
         # SQLite
         # -------------------------------------------------------
-        sqlite_path = (
-            config.get("sqlite_path")
-            or os.getenv("SQLITE_PATH")
-        )
+        sqlite_path = config.get("sqlite_path") or os.getenv("SQLITE_PATH")
         if not sqlite_path:
-            raise ValueError(
-                "SQLite path not provided. Set SQLITE_PATH or pass sqlite_path."
-            )
+            raise ValueError("SQLite path not provided. Set SQLITE_PATH or pass sqlite_path.")
 
         # -------------------------------------------------------
         # OpenAI credentials
         # -------------------------------------------------------
-        openai_api_key = (
-            config.get("openai_api_key")
-            or os.getenv("OPENAI_API_KEY")
-        )
+        openai_api_key = config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
         if not openai_api_key:
             raise ValueError(
                 "OpenAI API key missing. Set OPENAI_API_KEY or provide `openai_api_key`."
             )
 
         embed_model = (
-            config.get("embed_model")
-            or os.getenv("OPENAI_EMBED_MODEL")
-            or "text-embedding-3-small"
+            config.get("embed_model") or os.getenv("OPENAI_EMBED_MODEL") or "text-embedding-3-small"
         )
 
-        llm_model = (
-            config.get("llm_model")
-            or os.getenv("OPENAI_LLM_MODEL")
-            or "gpt-4.1-mini"
-        )
+        llm_model = config.get("llm_model") or os.getenv("OPENAI_LLM_MODEL") or "gpt-4.1-mini"
 
         temp_str = (
             str(config.get("llm_temperature"))
@@ -90,7 +77,7 @@ class Memory:
         )
         try:
             llm_temp = float(temp_str) if temp_str is not None else 0.0
-        except:
+        except Exception:
             llm_temp = 0.0
 
         # -------------------------------------------------------
@@ -98,29 +85,16 @@ class Memory:
         # Cloud: QDRANT_URL + QDRANT_API_KEY
         # Local: QDRANT_HOST + QDRANT_PORT
         # -------------------------------------------------------
-        qdrant_url = (
-            config.get("qdrant_url")
-            or os.getenv("QDRANT_URL")
-        )
-        qdrant_api_key = (
-            config.get("qdrant_api_key")
-            or os.getenv("QDRANT_API_KEY")
-        )
+        qdrant_url = config.get("qdrant_url") or os.getenv("QDRANT_URL")
+        qdrant_api_key = config.get("qdrant_api_key") or os.getenv("QDRANT_API_KEY")
 
-        qdrant_host = (
-            config.get("qdrant_host")
-            or os.getenv("QDRANT_HOST")
-        )
-        qdrant_port = (
-            config.get("qdrant_port")
-            or os.getenv("QDRANT_PORT")
-        )
+        qdrant_host = config.get("qdrant_host") or os.getenv("QDRANT_HOST")
+        qdrant_port = config.get("qdrant_port") or os.getenv("QDRANT_PORT")
 
         # At least one connection method must be provided
         if not qdrant_url and not qdrant_host:
             raise ValueError(
-                "Qdrant config missing. Provide either QDRANT_URL (cloud) "
-                "or QDRANT_HOST (local)."
+                "Qdrant config missing. Provide either QDRANT_URL (cloud) or QDRANT_HOST (local)."
             )
 
         # If URL is provided, API key is required
@@ -172,6 +146,10 @@ class Memory:
             collection=collection_name,
             vector_size=self.embedder.vector_size,
         )
+
+        # Reranker
+        reranker_cfg = config.get("reranker")
+        self.reranker = create_reranker(reranker_cfg)
 
     # ------------------------------------------------------------------ #
     # Lazy-expire helper (per user, easy to remove later)
@@ -326,84 +304,117 @@ class Memory:
         user_id: str,
         filters: dict[str, Any] | None = None,
         limit: int = 10,
+        rerank: bool = False,
     ) -> dict[str, Any]:
         """
         Semantic search over user's memories.
 
-        Steps:
-        - Lazy-expire this user's memories (so expired ones become status='expired').
-        - Embed query
-        - Vector search in Qdrant (filtered by user_id and optional filters)
-        - Fetch MemoryModel from SQLite by ids
-        - Drop non-active memories defensively
-        - Temporal-aware re-ranking
-        """
-        # FIRST: expire stale memories for this user
-        self._lazy_expire_user(user_id)
+        If rerank=True AND a reranker is configured, we:
+        - overfetch from Qdrant (limit*3)
+        - rerank that pool
+        - then apply temporal scoring on top
 
+        If rerank=False OR no reranker configured:
+        - we just use vector similarity + temporal scoring (no reranker).
+        """
         filters = filters or {}
         if "status" not in filters:
             filters["status"] = "active"
 
+        # 1) embed query
         try:
             q_vec = self.embedder.embed_one(query)
         except Exception as e:
-            print("[Memory.search] Embedding failed for query:", query, "err:", e)
+            print("[Memory.search] Embedding failed:", e)
             traceback.print_exc()
             return {"results": []}
 
+        # Do we actually have a reranker?
+        use_reranker = bool(rerank and self.reranker)
+
+        # 2) vector search
         try:
+            raw_limit = limit * 3 if use_reranker else limit
             vec_results = self.vector_store.search(
                 query_vector=q_vec,
                 user_id=user_id,
-                limit=limit,
+                limit=raw_limit,
                 filters=filters,
             )
         except Exception as e:
-            print("[Memory.search] Qdrant search failed for query:", query, "err:", e)
+            print("[Memory.search] Qdrant search failed:", e)
             traceback.print_exc()
             return {"results": []}
 
-        ids = [r["id"] for r in vec_results]
-        if not ids:
+        if not vec_results:
             return {"results": []}
 
+        ids = [r["id"] for r in vec_results]
         mems = self.metadata_store.list_by_ids(ids)
         mem_by_id = {m.id: m for m in mems}
 
-        # Merge similarity score from Qdrant with temporal info for ranking
-        now = datetime.utcnow()
-        combined: list[dict[str, Any]] = []
-
+        # Build candidate docs from vector search
+        candidates = []
         for r in vec_results:
-            mem_id = r["id"]
-            score = r["score"]
-            mem = mem_by_id.get(mem_id)
+            mem = mem_by_id.get(r["id"])
+            if not mem:
+                continue
+            candidates.append(
+                {
+                    "id": mem.id,
+                    "memory": mem.memory,
+                    "vector_score": r["score"],
+                }
+            )
+
+        # 3) Optional rerank
+        if use_reranker:
+            try:
+                candidates = self.reranker.rerank(
+                    query=query,
+                    documents=candidates,  # <-- fixed, not documents[candidates]
+                    top_k=limit,
+                )
+            except Exception as e:
+                print("[Memory.search] Reranker failed:", e)
+                traceback.print_exc()
+                # fall back to vector-only order (already in candidates)
+
+        # 4) Merge with temporal scoring + serialize
+        now = datetime.utcnow()
+        results = []
+
+        # we already limited via top_k in reranker, but still slice defensively
+        for c in candidates[:limit]:
+            mem = mem_by_id.get(c["id"])
             if not mem:
                 continue
 
-            # Defensive: even if Qdrant returns it, don't surface non-active memories
-            if mem.status != "active":
-                continue
+            base_score = c.get("vector_score", 0.0)
+            rerank_score = c.get("rerank_score", None)
+
+            # Combine scores: tune this if needed
+            combined_score = base_score
+            if rerank_score is not None:
+                combined_score = 0.2 * base_score + 0.8 * rerank_score
 
             final_score = self._compute_rank_score(
-                base_score=score,
+                base_score=combined_score,
                 mem=mem,
                 now=now,
             )
 
-            combined.append(
+            results.append(
                 {
                     "memory": self._serialize_memory(mem),
-                    "similarity": score,
+                    "similarity": base_score,
+                    "rerank_score": rerank_score,
                     "score": final_score,
                 }
             )
 
-        # Sort by final score descending
-        combined.sort(key=lambda x: x["score"], reverse=True)
-
-        return {"results": combined}
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return {"results": results}
 
     def _compute_rank_score(
         self,
