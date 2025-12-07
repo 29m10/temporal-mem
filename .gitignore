@@ -214,5 +214,4 @@ examples/
 
 # Qdrant binary and storage
 qdrant
-storage/
 .qdrant-initialized
