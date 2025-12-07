@@ -1,6 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "temporal-mem"
+name = "temporalmemai"
+version = "0.1.0"
+description = "A temporal-aware AI memory engine that extracts, stores, and retrieves long-term user memories with built-in decay, versioning, and freshness scoring"
+readme = "README.md"
 requires-python = ">=3.13"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "TemporalMemAI Contributors"}
+]
+keywords = [
+    "ai",
+    "memory",
+    "temporal",
+    "embeddings",
+    "vector-search",
+    "qdrant",
+    "llm",
+    "reranking",
+    "semantic-search",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "qdrant-client>=1.7.0",
+]
+
+[project.optional-dependencies]
+cohere = [
+    "cohere>=4.0.0",
+]
+huggingface = [
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+]
+all = [
+    "cohere>=4.0.0",
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/29m10/temporalmemai"
+Repository = "https://github.com/29m10/temporalmemai"
+Documentation = "https://github.com/29m10/temporalmemai#readme"
+Issues = "https://github.com/29m10/temporalmemai/issues"
+
+[tool.hatchling.build.targets.wheel]
+packages = ["temporalmemai"]
 
 [tool.ruff]
 target-version = "py313"
@@ -37,7 +100,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.ruff.lint.isort]
-known-first-party = ["temporal_mem"]
+known-first-party = ["temporalmemai"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py
